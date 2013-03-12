@@ -164,7 +164,7 @@ module Spree
 
     # If true, causes the confirmation step to happen during the checkout process
     def confirmation_required?
-      payment_method && payment_method.payment_profiles_supported?
+      payments.map(&:payment_method).any?(&:payment_profiles_supported?)
     end
 
     # Indicates the number of items in the order
@@ -408,23 +408,8 @@ module Spree
     end
 
     def rate_hash
-      return @rate_hash if @rate_hash.present?
-
-      # reserve one slot for each shipping method computation
-      computed_costs = Array.new(available_shipping_methods(:front_end).size)
-
-      # create all the threads and kick off their execution
-      threads = available_shipping_methods(:front_end).each_with_index.map do |ship_method, index|
-        Thread.new { computed_costs[index] = [ship_method, ship_method.calculator.compute(self)] }
-      end      
-
-      # wait for all threads to finish
-      threads.map(&:join)
-
-      # now consolidate and memoize the threaded results
-      @rate_hash ||= computed_costs.map do |pair|
-        ship_method,cost = *pair
-        next unless cost
+      @rate_hash ||= available_shipping_methods.collect do |ship_method|
+        next unless cost = ship_method.calculator.compute(self)
         ShippingRate.new( :id => ship_method.id,
                           :shipping_method => ship_method,
                           :name => ship_method.name,
@@ -437,20 +422,8 @@ module Spree
       payment_state == 'paid'
     end
 
-    def payment
-      payments.first
-    end
-
     def available_payment_methods
       @available_payment_methods ||= PaymentMethod.available(:front_end)
-    end
-
-    def payment_method
-      if payment and payment.payment_method
-        payment.payment_method
-      else
-        available_payment_methods.first
-      end
     end
 
     def pending_payments
